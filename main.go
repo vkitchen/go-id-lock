@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"sync"
 )
 
@@ -51,9 +52,26 @@ func (g *lockGroup) acquire(id string) *sync.Mutex {
 
 var idLocks lockGroup
 
-func main() {
+func init() {
 	idLocks = newLockGroup()
-	idLocks.lock("hello world")
-	println("hello, world!")
-	idLocks.unlock("hello world")
+}
+
+func handler(wg *sync.WaitGroup, id string) {
+	defer wg.Done()
+
+	idLocks.lock(id)
+	println("Locked", id)
+	idLocks.unlock(id)
+	println("Unlocked", id)
+}
+
+func main() {
+	var wg sync.WaitGroup
+
+	for i := 0; i < maxLocks; i++ {
+		wg.Add(1)
+		go handler(&wg, strconv.Itoa(i))
+	}
+
+	wg.Wait()
 }
