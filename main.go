@@ -21,63 +21,6 @@ func newLockGroup() lockGroup {
 	return group
 }
 
-func (g *lockGroup) lock(id string) {
-	var lock *sync.Mutex
-
-	g.outer.Lock()
-	shouldCollect := g.shouldCollect()
-	if !shouldCollect {
-		lock = g.acquire(id)
-	}
-	g.outer.Unlock()
-	if shouldCollect {
-		g.collect()
-		g.outer.Lock()
-		lock = g.acquire(id)
-		g.outer.Unlock()
-	}
-	lock.Lock()
-}
-
-func (g *lockGroup) unlock(id string) {
-	g.outer.Lock()
-	lock := g.acquire(id)
-	g.outer.Unlock()
-	lock.Unlock()
-}
-
-func (g *lockGroup) shouldCollect() bool {
-	return len(g.locks) == maxLocks
-}
-
-func (g *lockGroup) collect() {
-	println("Collecting...")
-	var locks []*sync.Mutex
-	g.outer.Lock()
-	if len(g.locks) == maxLocks {
-		for _, v := range g.locks {
-			locks = append(locks, v)
-		}
-	}
-	g.outer.Unlock()
-	for _, v := range locks {
-		v.Lock()
-	}
-	g.outer.Lock()
-	g.locks = make(map[string]*sync.Mutex)
-	g.outer.Unlock()
-	println("Collected")
-}
-
-func (g *lockGroup) acquire(id string) *sync.Mutex {
-	if lock, ok := g.locks[id]; ok {
-		return lock
-	}
-	lock := &sync.Mutex{}
-	g.locks[id] = lock
-	return lock
-}
-
 var idLocks lockGroup
 
 func init() {
@@ -87,18 +30,40 @@ func init() {
 func handler(wg *sync.WaitGroup, id string) {
 	defer wg.Done()
 
-	idLocks.lock(id)
+	idLocks.outer.Lock()
+
+	if len(idLocks.locks) > maxLocks {
+		println("Collecting...")
+		for _, lock := range idLocks.locks {
+			lock.Lock()
+		}
+		idLocks.locks = make(map[string]*sync.Mutex)
+		println("Collected")
+	}
+
+	lock, ok := idLocks.locks[id]
+	if !ok {
+		lock = &sync.Mutex{}
+		idLocks.locks[id] = lock
+	}
+
+	lock.Lock()
 	println("Locked", id)
-	idLocks.unlock(id)
+
+	idLocks.outer.Unlock()
+
+	lock.Unlock()
 	println("Unlocked", id)
 }
 
 func main() {
 	var wg sync.WaitGroup
 
-	for i := 0; i < 5*maxLocks; i++ {
-		wg.Add(1)
-		go handler(&wg, strconv.Itoa(i))
+	for j := 0; j < 100; j++ {
+		for i := 0; i < 5*maxLocks; i++ {
+			wg.Add(1)
+			go handler(&wg, strconv.Itoa(i))
+		}
 	}
 
 	wg.Wait()
